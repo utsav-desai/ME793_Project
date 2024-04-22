@@ -1,0 +1,17 @@
+{   
+    "device":"cpu",
+    "img_size": 512,
+    "batch_size": 2,
+    "epochs": 400,
+    "num_classes" : 114,
+    "lr" : 3e-4,
+    "embedding_dim": 100,
+
+    "shapes" :2,
+    "locations" : 3,
+    "cooling_rates" : 3,
+    "soaking_times": 3,
+    "forging_temps": 3,
+    "heat_treatments" : 2,
+    "magnifications" : 6
+}
