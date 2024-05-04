@@ -160,8 +160,7 @@ for e in range(1, n_epoch+1):
         #sampled_images = reverse_transforms(sampled_images)
         ema_sampled_images = diffusion.sample(ema_model, n_sampled_images, t_shp, t_loc, t_cr, t_sk, t_ht, t_ft, t_mag, cfg_scale=0)
         ema_sampled_images = reverse_transforms(ema_sampled_images)
-        #show_grids(sampled_images, test_labels,  e, label_dict)
-        show_grids(ema_sampled_images, test_labels,  e, label_dict)
+        # show_grids(ema_sampled_images, test_labels,  e, label_dict, config)
         save_model(CHECKPOINT_PATH)
 
 print(torch.cuda.memory_summary(device=device))

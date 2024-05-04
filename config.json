@@ -1,5 +1,5 @@
 {   
-    "device":"cpu",
+    "device":"cuda",
     "image_size": 512,
     "batch_size": 2,
     "epochs": 400,
