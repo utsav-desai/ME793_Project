@@ -51,7 +51,7 @@ class Diffusion:
         with torch.no_grad():
             x = torch.randn((n, 1, self.img_size, self.img_size)).to(device)
             for i in reversed(range(1, self.noise_steps)):
-                print(i)
+                # print(i)
                 t = (torch.ones(n)*i).long().to(device)
                 predicted_noise = model(x,t, SHP, Loc, CR, SK, HT, FT, Mag)
                 if cfg_scale > 0:

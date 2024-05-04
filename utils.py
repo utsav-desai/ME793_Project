@@ -10,12 +10,40 @@ from mpl_toolkits.axes_grid1 import ImageGrid
 import os
 
 ROOT = os.path.dirname(__file__)
+DATA_DIR = os.path.join(ROOT,"data")
+CHECKPOINT_PATH = os.path.join( ROOT , 'checkpoints', 'model.pth.tar')
 
 def get_config():
     setup_file = os.path.join(ROOT,"config.json")
     with open(setup_file,'r') as file:
         config = json.loads(file.read())
     return config
+
+config = get_config()
+
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
+batch_size = config["batch_size"]
+n_epoch = config["epochs"]
+n_ax = int(n_epoch/20) 
+#n_ax = 1
+image_size = config["image_size"]
+image_shape = (1,image_size,image_size)
+image_dim = int(np.prod(image_shape))
+learning_rate = config['lr']
+total_loss_min = np.Inf
+
+n_sampled_images = 4
+shapes = 2
+locations = 3
+cooling_rates = 3
+soaking_times = 3
+forging_temps = 3
+heat_treatments = 2
+magnifications = 6
+embedding_dim = 100
+num_classes = 114
+print('Variables Created in ddpm.py')
 
 fig = plt.figure(figsize = (100,100))
 def show_images(images, index, label):
@@ -65,9 +93,30 @@ def weights_init(m):
         torch.nn.init.normal_(m.weight, 1.0, 0.02)
         torch.nn.init.zeros_(m.bias)
 
+whole_transform = transforms.Compose([
+    transforms.Resize((image_size,image_size)),
+    transforms.ToTensor(),
+    transforms.Grayscale(),
+    transforms.RandomCrop(512),
+    transforms.Lambda(lambda t: (t * 2) - 1)
+    ])
+
+aug_transform = transforms.Compose([
+    transforms.Resize((image_size,image_size)),
+    transforms.RandomHorizontalFlip(p = 0.5),
+    transforms.RandomVerticalFlip(p = 0.5),
+    ]) 
+
 reverse_transforms = transforms.Compose([
         transforms.Lambda(lambda t: (t + 1) / 2),
         transforms.Lambda(lambda t: t * 255.),
+    ])
+
+grid_transform = transforms.Compose([
+    transforms.Resize((image_size,image_size)),
+    transforms.ToTensor(),
+    transforms.Grayscale(),
+    transforms.Lambda(lambda t: (t * 2) - 1)
     ])
 
 

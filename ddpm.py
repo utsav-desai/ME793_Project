@@ -17,7 +17,7 @@ from mpl_toolkits.axes_grid1 import ImageGrid
 
 from utils import *
 from modules import *
-from inference import *
+# from inference import *
 
 print('Imports finished in ddpm.py')
 
@@ -33,7 +33,7 @@ batch_size = config["batch_size"]
 n_epoch = config["epochs"]
 n_ax = int(n_epoch/20) 
 #n_ax = 1
-image_size = config["img_size"]
+image_size = config["image_size"]
 image_shape = (1,image_size,image_size)
 image_dim = int(np.prod(image_shape))
 learning_rate = config['lr']
@@ -51,7 +51,7 @@ embedding_dim = 100
 num_classes = 114
 print('Variables Created in ddpm.py')
 
-class_table = torch.Tensor(pd.read_csv("class_table.csv", index_col=False).to_numpy().T)
+class_table = torch.Tensor(pd.read_csv(os.path.join(ROOT, "data", "class_table.csv"), index_col=False).to_numpy().T)
 
 label_dict = {
     0: 'CM01-0500', 1: 'CM01-1000',2: 'CM01-1500',3: 'CM01-2000',4: 'CM04-0100',5: 'CM04-0500',
@@ -78,100 +78,11 @@ label_dict = {
     106: 'PS16-0500',107: 'PS16-1000',108: 'PS16-2000',109: 'PS16-3000',110: 'PS18-0100',
     111: 'PS18-0500',112: 'PS18-1000',113: 'PS18-2000'
 }
-#grid_transform = transforms.Compose([
-#    transforms.ToTensor(),
-#    transforms.Grayscale(),
-#    transforms.Normalize((0.5),(0.5))
-#    ])
 
-
-grid_transform = transforms.Compose([
-    transforms.Resize((image_size,image_size)),
-    transforms.ToTensor(),
-    transforms.Grayscale(),
-    transforms.Lambda(lambda t: (t * 2) - 1)
-    ])
-
-#grid_dataset = datasets.ImageFolder(grid_dir, transform = grid_transform)
-#---
-#whole_transform = transforms.Compose([
-#    transforms.ToTensor(),
-#    transforms.Grayscale(),
-#    transforms.RandomCrop(256),
-#    transforms.Normalize((0.5),(0.5))
-#    ])
-
-whole_transform = transforms.Compose([
-    transforms.Resize((image_size,image_size)),
-    transforms.ToTensor(),
-    transforms.Grayscale(),
-    transforms.RandomCrop(512),
-    transforms.Lambda(lambda t: (t * 2) - 1)
-    ])
+## TrainLoader
 train_dataset = datasets.ImageFolder(DATA_DIR, transform = whole_transform)
-#---
-aug_transform = transforms.Compose([
-    transforms.Resize((image_size,image_size)),
-    transforms.RandomHorizontalFlip(p = 0.5),
-    transforms.RandomVerticalFlip(p = 0.5),
-    ]) 
-#---
-reverse_transforms = transforms.Compose([
-        transforms.Resize((image_size,image_size)),
-        transforms.Lambda(lambda t: (t + 1) / 2),
-        transforms.Lambda(lambda t: t * 255.),
-    ])
-#---
-#train_dataset = torch.utils.data.ConcatDataset([grid_dataset,whole_dataset])
-print('Starting Data Loader')
 train_loader = torch.utils.data.DataLoader(dataset = train_dataset, batch_size = batch_size, shuffle = True)
-print('Data Loader Finished')
-
-class Diffusion:
-    def __init__(self, noise_steps=1000, beta_start=1e-4, beta_end=0.02, img_size=image_size):
-        self.noise_steps = noise_steps
-        self.beta_start = beta_start
-        self.beta_end = beta_end
-        self.img_size = img_size
-        
-        self.beta = self.prepare_noise_schedule().to(device)
-        self.alpha = 1. - self.beta
-        self.alpha_hat = torch.cumprod(self.alpha, dim=0)
-        
-    def prepare_noise_schedule(self):
-        return torch.linspace(self.beta_start, self.beta_end, self.noise_steps)
-    
-    def noise_images(self, x, t):
-        sqrt_alpha_hat = torch.sqrt(self.alpha_hat[t])[:, None, None, None]
-        sqrt_one_minus_alpha_hat = torch.sqrt(1. - self.alpha_hat[t])[:,None, None, None]
-        epsilon = torch.randn_like(x)
-        return sqrt_alpha_hat*x + sqrt_one_minus_alpha_hat*epsilon, epsilon
-    
-    def sample_timesteps(self,n):
-        return torch.randint(low = 1, high = self.noise_steps, size = (n,))
-    
-    def sample(self, model, n, SHP, Loc, CR, SK, HT, FT, Mag, cfg_scale=0):
-        model.eval()
-        with torch.no_grad():
-            x = torch.randn((n, 1, self.img_size, self.img_size)).to(device)
-            for i in reversed(range(1, self.noise_steps)):
-                t = (torch.ones(n)*i).long().to(device)
-                predicted_noise = model(x,t, SHP, Loc, CR, SK, HT, FT, Mag)
-                if cfg_scale > 0:
-                    uncond_predicted_noise = model(x,t, None, None, None, None, None, None, None)
-                    predicted_noise = torch.lerp(uncond_predicted_noise, predicted_noise, cfg_scale)
-                alpha = self.alpha[t][:, None, None, None]
-                alpha_hat = self.alpha_hat[t][:, None, None, None]
-                beta = self.beta[t][:, None, None, None]
-                if i>1:
-                    noise = torch.randn_like(x)
-                else:
-                    noise = torch.zeros_like(x)
-                x = 1 / torch.sqrt(alpha) * (x - ((1 - alpha) / (torch.sqrt(1 - alpha_hat))) * predicted_noise) + torch.sqrt(beta) * noise
-        model.train()
-        #x = (x.clamp(-1,1)+1)/2
-        #x = (x*255).type(torch.uint8)
-        return x
+print('Data Loader Created !')
 
 print('Making unet conditional model')
 model = UNet_conditional(num_classes = num_classes).to(device)
@@ -187,7 +98,7 @@ ema = EMA(0.995)
 ema_model = copy.deepcopy(model).eval().requires_grad_(False)
 
 # load_dir = str(ROOT) + '/All_CDDM_HR_Cat_V_5.pth.tar'
-load_model(CH)
+# load_model(CHECKPOINT_PATH)
 
 def save_model(address):
     checkpoint = {"model_state": model.state_dict(),
