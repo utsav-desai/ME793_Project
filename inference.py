@@ -27,12 +27,14 @@ CHECKPOINT_PATH = os.path.join( ROOT , 'checkpoints', 'model.pth.tar')
 print('Imports finished')
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-"""
-Select Process Parameters
+
+
 
 """
-#Cast-forged AZ80 Magnesium Alloy Microstructure Image Generation
-#Select process parameters from valid enteries for each parameter below
+Vast-forged AZ80 Magnesium Alloy Microstructure Image Generation
+Select process parameters from valid enteries for each parameter below
+
+"""
 
 #Cast geometry {valid enteries: "cylinder" or "preform"}
 cast_geometry = "cylinder"
@@ -50,6 +52,8 @@ forging_temperature = "350"
 magnification = "1000"
 batch_size = 4
 n_sampled_images = 1
+
+
 
 image_shape = (1,512,512)
 image_size = 512
@@ -117,16 +121,14 @@ def load_model(address):
         model.load_state_dict(checkpoint["model_state"])
         ema_model.load_state_dict(checkpoint["ema_model_state"])
         optimizer.load_state_dict(checkpoint["model_optimizer"])
-        
-print('Functions created')
-    
+            
 
 if __name__ == "__main__":
     model = UNet_conditional(num_classes = num_classes).to(device)
     ema_model = UNet_conditional(num_classes = num_classes).to(device)
     optimizer = optim.Adam(model.parameters(), lr = learning_rate)
     diffusion = Diffusion(img_size = image_size)
-    # load_model(CHECKPOINT_PATH)
+    load_model(CHECKPOINT_PATH)
 
     with torch.no_grad():
         t_shp = torch.tensor([shp_dict[cast_geometry]])
@@ -146,12 +148,8 @@ if __name__ == "__main__":
         t_ft = t_ft.long().to(device)
         t_mag = t_mag.long().to(device)
         print('moved variables to device')
-        #sampled_images = diffusion.sample(model, n_sampled_images, t_shp, t_loc, t_cr, t_sk, t_ht, t_ft, t_mag, cfg_scale=0)
-        #sampled_images = reverse_transforms(sampled_images)
         ema_sampled_images = diffusion.sample(ema_model, n_sampled_images, t_shp, t_loc, t_cr, t_sk, t_ht, t_ft, t_mag, cfg_scale=0)
         print('Images generated')
         ema_sampled_images = reverse_transforms(ema_sampled_images)
-        print('Images reversed')
-        #show_grids(sampled_images, test_labels,  e, label_dict)
         show_grids(ema_sampled_images)
     
