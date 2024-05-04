@@ -11,6 +11,7 @@ setup_file = os.path.join(ROOT,"config.json")
 with open(setup_file,'r') as file:
     config = json.loads(file.read())
 
+image_size = config["image_size"]
 device = config["device"]
 shapes = config["shapes"]
 locations = config["locations"]
@@ -22,6 +23,53 @@ magnifications = config["magnifications"]
 embedding_dim = config["embedding_dim"]
 num_classes = config["num_classes"]
 
+class Diffusion:
+    def __init__(self, noise_steps=1000, beta_start=1e-4, beta_end=0.02, img_size=image_size):
+        self.noise_steps = noise_steps
+        self.beta_start = beta_start
+        self.beta_end = beta_end
+        self.img_size = img_size
+        
+        self.beta = self.prepare_noise_schedule().to(device)
+        self.alpha = 1. - self.beta
+        self.alpha_hat = torch.cumprod(self.alpha, dim=0)
+        
+    def prepare_noise_schedule(self):
+        return torch.linspace(self.beta_start, self.beta_end, self.noise_steps)
+    
+    def noise_images(self, x, t):
+        sqrt_alpha_hat = torch.sqrt(self.alpha_hat[t])[:, None, None, None]
+        sqrt_one_minus_alpha_hat = torch.sqrt(1. - self.alpha_hat[t])[:,None, None, None]
+        epsilon = torch.randn_like(x)
+        return sqrt_alpha_hat*x + sqrt_one_minus_alpha_hat*epsilon, epsilon
+    
+    def sample_timesteps(self,n):
+        return torch.randint(low = 1, high = self.noise_steps, size = (n,))
+    
+    def sample(self, model, n, SHP, Loc, CR, SK, HT, FT, Mag, cfg_scale=0):
+        model.eval()
+        with torch.no_grad():
+            x = torch.randn((n, 1, self.img_size, self.img_size)).to(device)
+            for i in reversed(range(1, self.noise_steps)):
+                print(i)
+                t = (torch.ones(n)*i).long().to(device)
+                predicted_noise = model(x,t, SHP, Loc, CR, SK, HT, FT, Mag)
+                if cfg_scale > 0:
+                    uncond_predicted_noise = model(x,t, None, None, None, None, None, None, None)
+                    predicted_noise = torch.lerp(uncond_predicted_noise, predicted_noise, cfg_scale)
+                alpha = self.alpha[t][:, None, None, None]
+                alpha_hat = self.alpha_hat[t][:, None, None, None]
+                beta = self.beta[t][:, None, None, None]
+                if i>1:
+                    noise = torch.randn_like(x)
+                else:
+                    noise = torch.zeros_like(x)
+                x = 1 / torch.sqrt(alpha) * (x - ((1 - alpha) / (torch.sqrt(1 - alpha_hat))) * predicted_noise) + torch.sqrt(beta) * noise
+        model.train()
+        #x = (x.clamp(-1,1)+1)/2
+        #x = (x*255).type(torch.uint8)
+        return x        
+    
 class EMA:
     def __init__(self, beta):
         super().__init__()
@@ -50,32 +98,9 @@ class EMA:
         ema_model.load_state_dict(model.state_dict())
         
 
-class SelfAttention2(nn.Module):
+class SelfAttention(nn.Module):
     def __init__(self, channels, size):
-        super(SelfAttention2, self).__init__()
-        self.channels = channels
-        self.size = size
-        self.mha = nn.MultiheadAttention(channels, 2, batch_first=True)
-        self.ln = nn.LayerNorm([channels])
-        self.ff_self = nn.Sequential(
-            nn.LayerNorm([channels]),
-            nn.Linear(channels, channels),
-            nn.GELU(),
-            nn.Linear(channels, channels)
-        )
-        
-    def forward(self,x):
-        x = x.view(-1, self.channels, self.size*self.size).swapaxes(1,2)
-        x_ln = self.ln(x)
-        attention_value, _ = self.mha(x_ln, x_ln, x_ln)
-        attention_value = attention_value + x
-        attention_value = self.ff_self(attention_value) + attention_value
-        return attention_value.swapaxes(2,1).view(-1, self.channels, self.size, self.size)
-    
-
-class SelfAttention4(nn.Module):
-    def __init__(self, channels, size):
-        super(SelfAttention4, self).__init__()
+        super(SelfAttention, self).__init__()
         self.channels = channels
         self.size = size
         self.mha = nn.MultiheadAttention(channels, 4, batch_first=True)
@@ -217,84 +242,6 @@ class Up(nn.Module):
         return x + emb
     
     
-class UNet(nn.Module):
-    def __init__(self,c_in = 1, c_out = 1, time_dim=256):
-        super().__init__()
-        self.time_dim = time_dim
-        self.inc = DoubleConv(c_in, 16)
-        self.down1 = Down(16,32)
-        self.sa1 = SelfAttention4(32, 128)
-        self.down2 = Down(32, 64)
-        self.sa2 = SelfAttention4(64, 64)
-        self.down3 = Down(64, 128)
-        self.sa3 = SelfAttention4(128, 32)
-        self.down4 = Down(128, 256)
-        self.sa4 = SelfAttention4(256, 16)
-        self.down5 = Down(256, 256)
-        self.sa5 = SelfAttention4(256, 8)
-        
-        self.bot1 = DoubleConv(256, 512)
-        self.bot2 = DoubleConv(512, 512)
-        self.bot3 = DoubleConv(512, 256)
-        
-        self.up5 = Up(512, 128)
-        self.as5 = SelfAttention4(128, 16)
-        self.up4 = Up(256, 64)
-        self.as4 = SelfAttention4(64, 32)
-        self.up3 = Up(128, 32)
-        self.as3 = SelfAttention4(32, 64)
-        self.up2 = Up(64, 16)
-        self.as2 = SelfAttention4(16, 128)
-        self.up1 = Up(32, 8)
-        self.as1 = SelfAttention4(8, 256)
-        self.outc = nn.Conv2d(8, c_out, kernel_size = 1)
-        
-    def pos_encoding(self, t, channels):
-        inv_freq = 1.0 / (
-            10000
-            ** (torch.arange(0, channels, 2).float().to(device) / channels)
-        )
-        pos_enc_a = torch.sin(t.repeat(1, channels // 2)*inv_freq)
-        pos_enc_b = torch.cos(t.repeat(1, channels // 2)*inv_freq)
-        pos_enc = torch.cat([pos_enc_a, pos_enc_b], dim=-1)
-        return pos_enc
-    
-    def forward(self, x, t):
-        t = t.unsqueeze(-1).type(torch.float)
-        t = self.pos_encoding(t, self.time_dim)
-        
-        x0 = self.inc(x)
-        x1 = self.down1(x0, t)
-        #x1 = self.sa1(x1)
-        x2 = self.down2(x1, t)
-        x2 = self.sa2(x2)
-        x3 = self.down3(x2, t)
-        x3 = self.sa3(x3)
-        x4 = self.down4(x3, t)
-        x4 = self.sa4(x4)
-        x5 = self.down5(x4, t)
-        x5 = self.sa5(x5)
-        x5 = self.bot1(x5)
-        x5 = self.bot2(x5)
-        x5 = self.bot3(x5)      
-        x = self.up5(x5, x4, t)
-        #del x5, x4
-        x = self.as5(x)
-        x = self.up4(x, x3, t)
-        #del x3
-        x = self.as4(x)
-        x = self.up3(x, x2, t)
-        #del x2
-        x = self.as3(x)
-        x = self.up2(x, x1, t)
-        #del x1
-        #x = self.as2(x)
-        x = self.up1(x, x0, t)
-        #del x0
-        #x = self.as1(x)
-        x = self.outc(x)
-        return x
-    
 
 class UNet_conditional(nn.Module):
     def __init__(self,c_in = 1, c_out = 1, time_dim=512, num_classes=None):
@@ -302,34 +249,34 @@ class UNet_conditional(nn.Module):
         self.time_dim = time_dim
         self.inc = DoubleConv(c_in, 16)
         self.down1 = Down(16,32, 256)
-        self.sa1 = SelfAttention4(32, 256)
+        self.sa1 = SelfAttention(32, 256)
         self.down2 = Down(32, 64, 128)
-        self.sa2 = SelfAttention4(64, 128)
+        self.sa2 = SelfAttention(64, 128)
         self.down3 = Down(64, 128, 64)
-        self.sa3 = SelfAttention2(128, 64)
+        self.sa3 = SelfAttention(128, 64)
         self.down4 = Down(128, 256, 32)
-        self.sa4 = SelfAttention4(256, 32)
+        self.sa4 = SelfAttention(256, 32)
         self.down5 = Down(256, 512, 16)
-        self.sa5 = SelfAttention4(512, 16)
+        self.sa5 = SelfAttention(512, 16)
         self.down6 = Down(512, 512, 8)
-        self.sa6 = SelfAttention4(512, 8)
+        self.sa6 = SelfAttention(512, 8)
         
         self.bot1 = DoubleConv(512, 512)
         self.bot2 = DoubleConv(512, 512)
         self.bot3 = DoubleConv(512, 512)
         
         self.up6 = Up(1024, 256, 16)
-        self.as6 = SelfAttention4(256, 16)
+        self.as6 = SelfAttention(256, 16)
         self.up5 = Up(512, 128, 32)
-        self.as5 = SelfAttention4(128, 32)
+        self.as5 = SelfAttention(128, 32)
         self.up4 = Up(256, 64, 64)
-        self.as4 = SelfAttention4(64, 64)
+        self.as4 = SelfAttention(64, 64)
         self.up3 = Up(128, 32, 128)
-        self.as3 = SelfAttention2(32, 128)
+        self.as3 = SelfAttention(32, 128)
         self.up2 = Up(64, 16, 256)
-        self.as2 = SelfAttention4(16, 256)
+        self.as2 = SelfAttention(16, 256)
         self.up1 = Up(32, 8, 512)
-        self.as1 = SelfAttention4(8, 512)
+        self.as1 = SelfAttention(8, 512)
         self.outc = nn.Conv2d(8, c_out, kernel_size = 1)
         
         
@@ -343,11 +290,11 @@ class UNet_conditional(nn.Module):
         pos_enc = torch.cat([pos_enc_a, pos_enc_b], dim=-1)
         return pos_enc
     
-
-    def forward(self, x, t=None, SHP=None, Loc=None, CR=None, SK=None, HT=None, FT=None, Mag=None):
+    def forward(self, x, t, SHP, Loc, CR, SK, HT, FT, Mag):
         t = t.unsqueeze(-1).type(torch.float)
         t = self.pos_encoding(t, self.time_dim)
             
+        
         x0 = self.inc(x)
         x1 = self.down1(x0, t, SHP, Loc, CR, SK, HT, FT, Mag)
         #x1 = self.sa1(x1)
@@ -373,10 +320,10 @@ class UNet_conditional(nn.Module):
         x = self.up4(x, x3, t, SHP, Loc, CR, SK, HT, FT, Mag)
         x = self.as4(x)
         x = self.up3(x, x2, t, SHP, Loc, CR, SK, HT, FT, Mag)
-        x = self.as3(x)
+        #x = self.as3(x)
         x = self.up2(x, x1, t, SHP, Loc, CR, SK, HT, FT, Mag)
         #x = self.as2(x)
         x = self.up1(x, x0, t, SHP, Loc, CR, SK, HT, FT, Mag)
         #x = self.as1(x)
-        output = self.outc(x)       
+        output = self.outc(x)
         return output

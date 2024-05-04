@@ -1,6 +1,6 @@
 {   
     "device":"cpu",
-    "img_size": 512,
+    "image_size": 512,
     "batch_size": 2,
     "epochs": 400,
     "num_classes" : 114,

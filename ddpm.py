@@ -1,4 +1,6 @@
-import json
+import os
+import copy
+import pandas as pd
 import torch
 import numpy as np
 import torch.nn as nn
@@ -12,21 +14,19 @@ from numpy.random import randn
 import torchvision.utils
 from torch.distributions import uniform
 from mpl_toolkits.axes_grid1 import ImageGrid
-import os
-import copy
+
 from utils import *
 from modules import *
-from image_generator import *
+from inference import *
 
-print('Imports Finished in ddpm.py')
+print('Imports finished in ddpm.py')
 
 ## CONFIG
-ROOT = os.path.dirname(__file__)
-setup_file = os.path.join(ROOT,"config.json")
-with open(setup_file,'r') as file:
-    config = json.loads(file.read())
+config = get_config()
 
-DATA_DIR = os.path.join(ROOT,"Data")
+ROOT = os.path.dirname(__file__)
+DATA_DIR = os.path.join(ROOT,"data")
+CHECKPOINT_PATH = os.path.join( ROOT , 'checkpoints', 'model.pth.tar')
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 batch_size = config["batch_size"]
@@ -50,57 +50,9 @@ magnifications = 6
 embedding_dim = 100
 num_classes = 114
 print('Variables Created in ddpm.py')
-#class_table = torch.tensor([[1,1,1,1,1,1,0,0,0,0,0,0],[1,0,1,0,0,1,1,0,1,0,0,1],[1.225, 0, -1.225, -1.225, 1.225, 0, 1.225, 0, -1.225, -1.225, 1.225, 0]])
-#class_table = torch.tensor([[1,1,1,1,1,1,0,0,0,0,0,0],[1,0,1,0,0,1,1,0,1,0,0,1],[2, 1, 0, 0, 2, 1, 2, 1, 0, 0, 2, 1]])
-class_table = torch.tensor([[0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
-         0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
-         0., 0., 0., 0., 0., 0., 0., 0., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1.,
-         1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1.,
-         1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1.,
-         1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1.,
-         1., 1., 1., 1., 1., 1.],
-        [1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1.,
-         1., 1., 1., 1., 1., 2., 2., 2., 2., 2., 2., 2., 2., 2., 2., 2., 2., 2.,
-         2., 2., 2., 2., 2., 2., 2., 2., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
-         0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
-         1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1.,
-         1., 1., 1., 1., 1., 1., 2., 2., 2., 2., 2., 2., 2., 2., 2., 2., 2., 2.,
-         2., 2., 2., 2., 2., 2.],
-        [1., 1., 1., 1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 1., 1., 1., 1.,
-         0., 0., 0., 0., 0., 1., 1., 1., 1., 1., 0., 0., 0., 0., 0., 0., 0., 0.,
-         1., 1., 1., 1., 1., 0., 0., 0., 2., 2., 2., 2., 2., 2., 2., 2., 2., 2.,
-         2., 2., 2., 2., 2., 2., 2., 2., 2., 2., 2., 2., 2., 2., 2., 2., 2., 2.,
-         2., 2., 2., 2., 2., 2., 2., 2., 2., 2., 2., 2., 2., 2., 2., 2., 2., 2.,
-         2., 2., 2., 2., 2., 2., 2., 2., 2., 2., 2., 2., 2., 2., 2., 2., 2., 2.,
-         2., 2., 2., 2., 2., 2.],
-        [0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
-         0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
-         0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
-         0., 0., 1., 1., 1., 1., 1., 2., 2., 2., 2., 2., 2., 0., 0., 0., 0., 0.,
-         0., 0., 0., 0., 0., 0., 0., 0., 0., 1., 1., 1., 1., 1., 2., 2., 2., 2.,
-         2., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 2., 2., 2.,
-         2., 2., 0., 0., 0., 0.],
-        [0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
-         0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
-         0., 0., 0., 0., 0., 0., 0., 0., 1., 1., 1., 1., 1., 1., 0., 0., 0., 0.,
-         0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
-         1., 1., 1., 1., 1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
-         0., 0., 0., 0., 0., 0., 1., 1., 1., 1., 1., 0., 0., 0., 0., 0., 0., 0.,
-         0., 0., 0., 0., 0., 0.],
-        [2., 2., 2., 2., 2., 2., 2., 2., 2., 2., 1., 1., 1., 1., 0., 0., 0., 0.,
-         0., 0., 0., 0., 0., 2., 2., 2., 2., 2., 2., 2., 2., 1., 1., 1., 1., 1.,
-         0., 0., 0., 0., 0., 0., 0., 0., 1., 1., 1., 1., 1., 1., 2., 2., 2., 2.,
-         2., 2., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 1., 1., 1., 1., 1.,
-         1., 1., 1., 1., 1., 2., 2., 2., 2., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
-         0., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 2., 2., 2., 2., 0., 0., 0.,
-         0., 0., 1., 1., 1., 1.],
-        [1., 2., 3., 4., 0., 1., 2., 3., 4., 5., 1., 2., 3., 4., 1., 2., 4., 5.,
-         1., 2., 3., 4., 5., 0., 1., 2., 3., 4., 1., 3., 5., 0., 1., 2., 3., 5.,
-         0., 1., 2., 4., 5., 1., 2., 4., 0., 1., 2., 3., 4., 5., 0., 1., 2., 3.,
-         4., 5., 0., 1., 2., 4., 5., 0., 1., 2., 3., 4., 5., 0., 1., 2., 3., 4.,
-         0., 1., 2., 4., 5., 0., 1., 2., 4., 0., 1., 2., 4., 5., 0., 1., 2., 4.,
-         5., 1., 2., 3., 4., 5., 1., 2., 3., 4., 5., 0., 1., 2., 4., 0., 1., 2.,
-         4., 5., 0., 1., 2., 4.]])
+
+class_table = torch.Tensor(pd.read_csv("class_table.csv", index_col=False).to_numpy().T)
+
 label_dict = {
     0: 'CM01-0500', 1: 'CM01-1000',2: 'CM01-1500',3: 'CM01-2000',4: 'CM04-0100',5: 'CM04-0500',
     6: 'CM04-1000',7: 'CM04-1500',8: 'CM04-2000',9: 'CM04-3000',10: 'CM10-0500',
@@ -126,14 +78,15 @@ label_dict = {
     106: 'PS16-0500',107: 'PS16-1000',108: 'PS16-2000',109: 'PS16-3000',110: 'PS18-0100',
     111: 'PS18-0500',112: 'PS18-1000',113: 'PS18-2000'
 }
-# Normalize((0.4433),(0.1038))
 #grid_transform = transforms.Compose([
 #    transforms.ToTensor(),
 #    transforms.Grayscale(),
 #    transforms.Normalize((0.5),(0.5))
 #    ])
 
+
 grid_transform = transforms.Compose([
+    transforms.Resize((image_size,image_size)),
     transforms.ToTensor(),
     transforms.Grayscale(),
     transforms.Lambda(lambda t: (t * 2) - 1)
@@ -149,6 +102,7 @@ grid_transform = transforms.Compose([
 #    ])
 
 whole_transform = transforms.Compose([
+    transforms.Resize((image_size,image_size)),
     transforms.ToTensor(),
     transforms.Grayscale(),
     transforms.RandomCrop(512),
@@ -157,11 +111,13 @@ whole_transform = transforms.Compose([
 train_dataset = datasets.ImageFolder(DATA_DIR, transform = whole_transform)
 #---
 aug_transform = transforms.Compose([
+    transforms.Resize((image_size,image_size)),
     transforms.RandomHorizontalFlip(p = 0.5),
     transforms.RandomVerticalFlip(p = 0.5),
     ]) 
 #---
 reverse_transforms = transforms.Compose([
+        transforms.Resize((image_size,image_size)),
         transforms.Lambda(lambda t: (t + 1) / 2),
         transforms.Lambda(lambda t: t * 255.),
     ])
@@ -230,8 +186,14 @@ l = len(train_loader)
 ema = EMA(0.995)
 ema_model = copy.deepcopy(model).eval().requires_grad_(False)
 
-load_dir = str(ROOT) + '/All_CDDM_HR_Cat_V_5.pth.tar'
-# load_model(load_dir)
+# load_dir = str(ROOT) + '/All_CDDM_HR_Cat_V_5.pth.tar'
+load_model(CH)
+
+def save_model(address):
+    checkpoint = {"model_state": model.state_dict(),
+                   "ema_model_state": ema_model.state_dict(),
+              "model_optimizer": optimizer.state_dict()}
+    torch.save(checkpoint, address)
 
 print('Starting Training')
 for e in range(1, n_epoch+1):
@@ -289,7 +251,6 @@ for e in range(1, n_epoch+1):
         ema_sampled_images = reverse_transforms(ema_sampled_images)
         #show_grids(sampled_images, test_labels,  e, label_dict)
         show_grids(ema_sampled_images, test_labels,  e, label_dict)
-        save_dir = str(ROOT) + '/Generated-Images/All_CDDM_HR_Cat_V_6.pth.tar'
-        save_model(save_dir)
+        save_model(CHECKPOINT_PATH)
 
 print(torch.cuda.memory_summary(device=device))
