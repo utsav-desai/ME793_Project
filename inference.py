@@ -28,12 +28,9 @@ print('Imports finished')
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 
-
-
 """
 Vast-forged AZ80 Magnesium Alloy Microstructure Image Generation
 Select process parameters from valid enteries for each parameter below
-
 """
 
 #Cast geometry {valid enteries: "cylinder" or "preform"}

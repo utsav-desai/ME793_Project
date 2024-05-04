@@ -1,3 +1,4 @@
+## Load Libraries
 import os
 import copy
 import pandas as pd
@@ -19,9 +20,8 @@ from utils import *
 from modules import *
 # from inference import *
 
-print('Imports finished in ddpm.py')
 
-## CONFIG
+## GET TRAINING CONFIG
 config = get_config()
 
 ROOT = os.path.dirname(__file__)
@@ -39,6 +39,8 @@ image_dim = int(np.prod(image_shape))
 learning_rate = config['lr']
 total_loss_min = np.Inf
 
+
+## LEVELS IN EACH PARAMETER
 n_sampled_images = 4
 shapes = 2
 locations = 3
@@ -49,8 +51,9 @@ heat_treatments = 2
 magnifications = 6
 embedding_dim = 100
 num_classes = 114
-print('Variables Created in ddpm.py')
+# print('Variables Created in ddpm.py')
 
+## Load Class Table
 class_table = torch.Tensor(pd.read_csv(os.path.join(ROOT, "data", "class_table.csv"), index_col=False).to_numpy().T)
 
 label_dict = {
@@ -79,12 +82,12 @@ label_dict = {
     111: 'PS18-0500',112: 'PS18-1000',113: 'PS18-2000'
 }
 
-## TrainLoader
+## Load data and create train Loader
 train_dataset = datasets.ImageFolder(DATA_DIR, transform = whole_transform)
 train_loader = torch.utils.data.DataLoader(dataset = train_dataset, batch_size = batch_size, shuffle = True)
-print('Data Loader Created !')
 
-print('Making unet conditional model')
+print('Making U-Net conditional model')
+## Crete Conditional Unet
 model = UNet_conditional(num_classes = num_classes).to(device)
 print('Model Created')
 #model.apply(weights_init)
@@ -96,9 +99,6 @@ print('Diffusion Created')
 l = len(train_loader)
 ema = EMA(0.995)
 ema_model = copy.deepcopy(model).eval().requires_grad_(False)
-
-# load_dir = str(ROOT) + '/All_CDDM_HR_Cat_V_5.pth.tar'
-# load_model(CHECKPOINT_PATH)
 
 def save_model(address):
     checkpoint = {"model_state": model.state_dict(),
